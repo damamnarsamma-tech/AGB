@@ -1,0 +1,10 @@
+{
+  "name": "Akshaya Gold Buyers",
+  "description": "Akshaya Gold Buyers is a trusted gold-buying service offering a simple, transparent, and convenient way to sell gold and receive competitive value. We provide professional gold evaluation and a smooth selling experience with a focus on trust, transparency, and customer satisfaction.\n",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

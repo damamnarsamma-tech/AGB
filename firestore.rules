@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && (
+        !('email_verified' in request.auth.token) 
+        || request.auth.token.email_verified == true
+        || request.auth.token.firebase.sign_in_provider == 'google.com'
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function getUserRole(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'damamnarsamma@gmail.com'
+        || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserRole(request.auth.uid) == 'admin')
+      );
+    }
+
+    // --- User Profile Rules ---
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId 
+        && isValidUser(incoming())
+        && incoming().uid == request.auth.uid
+        && (
+          (incoming().role == 'admin' && (request.auth.token.email == 'damamnarsamma@gmail.com' || isAdmin()))
+          || (incoming().role == 'user' && request.auth.token.email != 'damamnarsamma@gmail.com')
+        )
+        && incoming().createdAt == request.time;
+
+      allow update: if isSignedIn()
+        && (
+          (request.auth.uid == userId
+            && isValidUser(incoming())
+            && incoming().uid == existing().uid
+            && incoming().createdAt == existing().createdAt
+            && (
+              (incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName']))
+              || isAdmin()
+            )
+          )
+          || isAdmin()
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // --- Customer Callback / Enquiry Rules ---
+    match /enquiries/{enquiryId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isValidId(enquiryId)
+        && isValidEnquiry(incoming())
+        && incoming().status == 'pending' // Force initial state
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin() 
+        && isValidId(enquiryId)
+        && isValidEnquiry(incoming())
+        && incoming().createdAt == existing().createdAt; // Date is immutable
+
+      allow delete: if isAdmin();
+    }
+
+    // --- WhatsApp Message Templates Rules ---
+    match /whatsapp_templates/{templateId} {
+      allow get, list: if isAdmin();
+
+      allow create: if isAdmin()
+        && isValidId(templateId)
+        && isValidWhatsAppTemplate(incoming())
+        && incoming().createdAt == request.time;
+
+      allow update: if isAdmin()
+        && isValidId(templateId)
+        && isValidWhatsAppTemplate(incoming())
+        && incoming().createdAt == existing().createdAt;
+
+      allow delete: if isAdmin();
+    }
+
+    // --- Entity Schema Validation Blueprints ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'role', 'createdAt', 'displayName'])
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 150
+        && data.role is string && (data.role == 'user' || data.role == 'admin')
+        && (!data.keys().hasAll(['displayName']) || (data['displayName'] is string && data['displayName'].size() <= 100))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEnquiry(data) {
+      return data.keys().hasAll(['name', 'phone', 'status', 'createdAt'])
+        && data.keys().hasOnly(['name', 'phone', 'status', 'createdAt', 'message', 'location', 'service'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.phone is string && data.phone.size() > 0 && data.phone.size() <= 20
+        && data.status is string && (data.status == 'pending' || data.status == 'contacted' || data.status == 'closed')
+        && (!data.keys().hasAll(['message']) || (data['message'] is string && data['message'].size() <= 1000))
+        && (!data.keys().hasAll(['location']) || (data['location'] is string && data['location'].size() <= 150))
+        && (!data.keys().hasAll(['service']) || (data['service'] is string && data['service'].size() <= 150))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWhatsAppTemplate(data) {
+      return data.keys().hasAll(['title', 'stage', 'content', 'createdAt'])
+        && data.keys().hasOnly(['title', 'stage', 'content', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 120
+        && data.stage is string && (data.stage == 'Appointment' || data.stage == 'Pledged Gold' || data.stage == 'XRF Testing' || data.stage == 'Final Offer' || data.stage == 'Payout' || data.stage == 'General')
+        && data.content is string && data.content.size() > 0 && data.content.size() <= 1500
+        && data.createdAt is timestamp
+        && (!data.keys().hasAll(['updatedAt']) || data.updatedAt is timestamp);
+    }
+  }
+}
